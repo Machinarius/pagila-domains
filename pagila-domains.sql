@@ -54,7 +54,7 @@ CREATE TABLE directory.person(
 CREATE TABLE directory.customer_migration(
   customer_id int NOT NULL,
   generated_id uuid NOT NULL DEFAULT uuid_generate_v4(),
-  PRIMARY KEY (customer_id, generated_id)
+  PRIMARY KEY customer_id
 );
 
 INSERT INTO directory.customer_migration(customer_id)
@@ -88,7 +88,7 @@ ON
 CREATE TABLE directory.staff_migration(
   staff_id int NOT NULL,
   generated_id uuid NOT NULL DEFAULT uuid_generate_v4(),
-  PRIMARY KEY (staff_id, generated_id)
+  PRIMARY KEY staff_id
 );
 
 INSERT INTO directory.staff_migration(staff_id)
@@ -142,5 +142,79 @@ SELECT
 FROM 
   directory.staff_migration;
 
-DROP TABLE customer_migration; 
-DROP TABLE staff_migration;
+CREATE TABLE directory.store(
+    store_id int PRIMARY KEY,
+    manager_id uuid NOT NULL,
+    address_id int NOT NULL,
+    last_update date NOT NULL,
+    FOREIGN KEY(manager_id) REFERENCES directory.person(person_id),
+    FOREIGN KEY(address_id) REFERENCES directory.address(address_id)
+);
+
+INSERT INTO directory.store(
+    store_id, 
+    manager_id, 
+    address_id, 
+    last_update
+) 
+SELECT 
+    st.store_id,
+    per.person_id AS manager_id,
+    st.address_id,
+    st.last_update
+FROM public.store st
+INNER JOIN directory.staff_migration sm
+ON st.manager_staff_id = sm.staff_id
+INNER JOIN directory.person per
+ON sm.generated_id = per.person_id;
+
+INSERT INTO directory.person_role(
+  person_id, 
+  role_name
+) 
+SELECT 
+    person_id,
+    'store_manager' AS role_name
+FROM directory.store;
+
+CREATE SCHEMA fulfilment;
+
+CREATE TABLE fulfilment.inventory(
+    LIKE public.inventory
+);
+
+INSERT INTO fulfilment.inventory
+SELECT * FROM public.inventory;
+
+CREATE TABLE fulfilment.rental(
+    LIKE public.rental
+);
+
+ALTER TABLE fulfilment.rental 
+ADD CONSTRAINT rental_inventory_id
+FOREIGN KEY (inventory_id)
+REFERENCES fulfilment.inventory(inventory_id);
+
+INSERT INTO fulfilment.rental(
+  rental_date,
+  inventory_id,
+  customer_id,
+  return_date,
+  staff_id,
+  last_update
+)
+SELECT 
+    rent.rental_date,
+    rent.inventory_id,
+    cm.generated_id AS customer_id,
+    rent.return_date,
+    sm.generated_id AS staff_id,
+    rent.last_update 
+FROM public.rental rent
+INNER JOIN directory.customer_migration cm
+ON cm.customer_id = rent.customer_id
+INNER JOIN directory.staff_migration sm
+ON sm.staff_id = rent.staff_id;
+
+DROP TABLE directory.customer_migration;
+DROP TABLE directory.staff_migration;
