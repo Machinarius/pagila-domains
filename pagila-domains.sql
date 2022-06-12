@@ -142,6 +142,15 @@ SELECT
 FROM 
   directory.staff_migration;
 
+CREATE TABLE directory.email_identity(
+  person_id uuid NOT NULL PRIMARY KEY,
+  hashed_password bytea NOT NULL,
+  generated_salt bytea NOT NULL,
+  create_date date NOT NULL,
+  last_update date NOT NULL,
+  FOREIGN KEY (person_id) REFERENCES directory.person(person_id)
+);
+
 CREATE TABLE directory.store(
   store_id int PRIMARY KEY,
   manager_id uuid NOT NULL,
