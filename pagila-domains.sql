@@ -1,5 +1,6 @@
 CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 
+DROP SCHEMA IF EXISTS storefront CASCADE;
 CREATE SCHEMA storefront;
 
 CREATE TABLE storefront.actor(LIKE public.actor INCLUDING ALL);
@@ -25,6 +26,7 @@ ALTER TABLE storefront.film_actor ADD CONSTRAINT film_actor_film_id FOREIGN KEY 
 ALTER TABLE storefront.film_actor ADD CONSTRAINT film_actor_actor_id FOREIGN KEY (actor_id) REFERENCES storefront.actor(actor_id);
 INSERT INTO storefront.film_actor SELECT * FROM public.film_actor;
 
+DROP SCHEMA IF EXISTS directory CASCADE;
 CREATE SCHEMA directory;
 
 CREATE TABLE directory.country(LIKE public.country INCLUDING ALL);
@@ -52,9 +54,8 @@ CREATE TABLE directory.person(
 );
 
 CREATE TABLE directory.customer_migration(
-  customer_id int NOT NULL,
-  generated_id uuid NOT NULL DEFAULT uuid_generate_v4(),
-  PRIMARY KEY customer_id
+  customer_id int PRIMARY KEY NOT NULL,
+  generated_id uuid NOT NULL DEFAULT uuid_generate_v4()
 );
 
 INSERT INTO directory.customer_migration(customer_id)
@@ -86,9 +87,8 @@ ON
 	cust.customer_id = cm.customer_id;
 
 CREATE TABLE directory.staff_migration(
-  staff_id int NOT NULL,
-  generated_id uuid NOT NULL DEFAULT uuid_generate_v4(),
-  PRIMARY KEY staff_id
+  staff_id int PRIMARY KEY NOT NULL,
+  generated_id uuid NOT NULL DEFAULT uuid_generate_v4()
 );
 
 INSERT INTO directory.staff_migration(staff_id)
@@ -130,38 +130,38 @@ CREATE TABLE directory.person_role(
 
 INSERT INTO directory.person_role(person_id, role_name)
 SELECT
-  person_id,
+  generated_id AS person_id,
   'customer' AS role_name
 FROM
   directory.customer_migration;
 
 INSERT INTO directory.person_role(person_id, role_name)
 SELECT
-  person_id,
+  generated_id AS person_id,
   'staff' AS role_name
 FROM 
   directory.staff_migration;
 
 CREATE TABLE directory.store(
-    store_id int PRIMARY KEY,
-    manager_id uuid NOT NULL,
-    address_id int NOT NULL,
-    last_update date NOT NULL,
-    FOREIGN KEY(manager_id) REFERENCES directory.person(person_id),
-    FOREIGN KEY(address_id) REFERENCES directory.address(address_id)
+  store_id int PRIMARY KEY,
+  manager_id uuid NOT NULL,
+  address_id int NOT NULL,
+  last_update date NOT NULL,
+  FOREIGN KEY(manager_id) REFERENCES directory.person(person_id),
+  FOREIGN KEY(address_id) REFERENCES directory.address(address_id)
 );
 
 INSERT INTO directory.store(
-    store_id, 
-    manager_id, 
-    address_id, 
-    last_update
+  store_id, 
+  manager_id, 
+  address_id, 
+  last_update
 ) 
 SELECT 
-    st.store_id,
-    per.person_id AS manager_id,
-    st.address_id,
-    st.last_update
+  st.store_id,
+  per.person_id AS manager_id,
+  st.address_id,
+  st.last_update
 FROM public.store st
 INNER JOIN directory.staff_migration sm
 ON st.manager_staff_id = sm.staff_id
@@ -173,21 +173,28 @@ INSERT INTO directory.person_role(
   role_name
 ) 
 SELECT 
-    person_id,
-    'store_manager' AS role_name
+  manager_id AS person_id,
+  'store_manager' AS role_name
 FROM directory.store;
 
+DROP SCHEMA IF EXISTS fulfilment CASCADE;
 CREATE SCHEMA fulfilment;
 
 CREATE TABLE fulfilment.inventory(
-    LIKE public.inventory
+  LIKE public.inventory INCLUDING ALL
 );
 
 INSERT INTO fulfilment.inventory
 SELECT * FROM public.inventory;
 
 CREATE TABLE fulfilment.rental(
-    LIKE public.rental
+  rental_id serial4 NOT NULL PRIMARY KEY,
+	rental_date timestamptz NOT NULL,
+	inventory_id int4 NOT NULL,
+	customer_id uuid NOT NULL,
+	return_date timestamptz NULL,
+	staff_id uuid NOT NULL,
+	last_update timestamptz NOT NULL DEFAULT now()
 );
 
 ALTER TABLE fulfilment.rental 
@@ -204,17 +211,43 @@ INSERT INTO fulfilment.rental(
   last_update
 )
 SELECT 
-    rent.rental_date,
-    rent.inventory_id,
-    cm.generated_id AS customer_id,
-    rent.return_date,
-    sm.generated_id AS staff_id,
-    rent.last_update 
+  rent.rental_date,
+  rent.inventory_id,
+  cm.generated_id AS customer_id,
+  rent.return_date,
+  sm.generated_id AS staff_id,
+  rent.last_update 
 FROM public.rental rent
 INNER JOIN directory.customer_migration cm
 ON cm.customer_id = rent.customer_id
 INNER JOIN directory.staff_migration sm
 ON sm.staff_id = rent.staff_id;
+
+DROP SCHEMA IF EXISTS payments CASCADE;
+CREATE SCHEMA payments;
+
+CREATE TABLE payments.payment (
+	payment_id serial4 NOT NULL,
+	customer_id uuid NOT NULL,
+	staff_id uuid NOT NULL,
+	rental_id int4 NOT NULL,
+	amount numeric(5, 2) NOT NULL,
+	payment_date timestamptz NOT NULL
+);
+
+INSERT INTO payments.payment
+SELECT 
+  pay.payment_id,
+  cm.generated_id AS customer_id,
+  sm.generated_id AS staff_id,
+  pay.rental_id,
+  pay.amount,
+  pay.payment_date
+FROM public.payment pay
+INNER JOIN directory.customer_migration cm
+ON cm.customer_id = pay.customer_id
+INNER JOIN directory.staff_migration sm
+ON sm.staff_id = pay.staff_id;
 
 DROP TABLE directory.customer_migration;
 DROP TABLE directory.staff_migration;
